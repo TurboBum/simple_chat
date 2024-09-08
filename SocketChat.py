@@ -1,6 +1,7 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QColorDialog
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QColor
 
 # Флаг для определения, когда программа должна быть переключена на веб-чат
 is_web_chat = False
@@ -34,6 +35,9 @@ class ChatClient(QWidget):
         self.message_input = QLineEdit()
         self.message_input.returnPressed.connect(self.send_message)
 
+        # Инициализируем цвет никнейма
+        self.nick_color = QColor("red")
+
         # Компоновка виджетов
         layout = QVBoxLayout()
         input_layout = QHBoxLayout()
@@ -49,7 +53,27 @@ class ChatClient(QWidget):
         layout.addWidget(self.message_input)
         self.setLayout(layout)
 
+    def keyPressEvent(self, event):
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_K:
+            self.open_color_picker()
+        else:
+            super().keyPressEvent(event)
+
+    def open_color_picker(self):
+        # Открываем диалог выбора цвета
+        color = QColorDialog.getColor(self.nick_color, self, "Цвет ника")
+        if color.isValid():
+            self.nick_color = color
+
+    def send_message(self):
+        # Используем self.nick_color для форматирования никнейма
+        nick_style = f"<span style='color:{self.nick_color.name()};'>{self.nick_input.text()}</span>"
+        print(self.nick_color.name())
+        self.chat_window.append(f"{nick_style} :  {self.message_input.text()}")
+        self.message_input.clear()
+
     def connect_to_chat(self):
+        self.chat_window.clear()
         # Здесь должен быть код для переключения программы на веб-чат
         self.chat_window.append('Switching to web chat...')
 
@@ -66,7 +90,7 @@ class ChatClient(QWidget):
         self.connect_button.setText("Reconnect")
         self.connect_button.clicked.disconnect()
         self.connect_button.clicked.connect(self.reconnectChat)
-
+        
     def reconnectChat(self):
         # Код для переподключения к веб-чату
         self.chat_window.append('Reconnecting to web chat...')
@@ -84,16 +108,6 @@ class ChatClient(QWidget):
 
         # Добавьте код для переподключения к веб-чату
         # ...
-
-
-
-    def send_message(self):
-        # Здесь должен быть код для отправки сообщения в чат
-        message = self.message_input.text()
-        self.chat_window.append(f'{self.nick_input.text()}: {message}')
-        self.message_input.clear()
-
-
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
