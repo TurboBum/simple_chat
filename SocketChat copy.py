@@ -1,12 +1,12 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QTextEdit, QColorDialog
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor
 import socket
 import threading
 
 # Создаем сокет
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
 # Флаг для определения, когда программа должна быть переключена на веб-чат
 is_web_chat = False
 
@@ -14,6 +14,8 @@ class ChatClient(QWidget):
     def __init__(self):
         super().__init__()
         self.initUI()
+        self.new_messages = []
+
 
     def initUI(self):
         self.setWindowTitle('Chat Client')
@@ -70,63 +72,109 @@ class ChatClient(QWidget):
             self.nick_color = color
 
     def send_message(self):
-        # Используем self.nick_color для форматирования никнейма
+        message = self.message_input.text()
         nick_style = f"<span style='color:{self.nick_color.name()};'>{self.nick_input.text()}</span>"
-        message = [nick_style, self.message_input.text()]
-        client_socket.send(str(message).encode('utf-8'))
-        self.chat_window.append(f"{nick_style} :  {self.message_input.text()}")
+        self.chat_window.append(f"{nick_style} : {message}")
         self.message_input.clear()
-    def receiving_messages(self):
-        while True:
-            try:
-                # Получаем сообщение от сервера
-                message = list(client_socket.recv(4096).decode('utf-8'))
-                self.chat_window.append(f"{message[0]} :  {message[1]}")
-            except:
-                # При ошибке закрываем соединение
-                print("Произошла ошибка!")
-                client_socket.close()
-                break 
-    def connect_to_chat(self):
-        self.chat_window.clear()
-        # Здесь должен быть код для переключения программы на веб-чат
-        client_socket.connect((self.ip_input.text(), int(self.port_input.text())))
-        self.chat_window.append('Вы подключены к чату')
-        client_socket.send(self.nick_input.text().encode('utf-8'))
+        self.worker.send_message(f"{nick_style} : {message}")
 
+    def connect_to_chat(self):
+        nick = f"<span style='color:{self.nick_color.name()};'>{self.nick_input.text()}</span>"
+        host = self.ip_input.text()
+        port = int(self.port_input.text())
+        self.worker = WorkerSocket(host, port, nick, self.chat_window)
+        self.worker.finished.connect(self.on_thread_finished)
+        self.worker.start()
+    def on_thread_finished(self, success):
+        self.chat_window.clear()
+        print(success)
+        if success:
+            self.chat_window.append(f"{self.worker.username} вы были подключены к чату ")
+        else:
+            self.chat_window.append("Неудачное подключение")
         # Блокируем ввод IP-адреса, порта и никнейма
         self.ip_input.setEnabled(False)
         self.port_input.setEnabled(False)
         self.nick_input.setEnabled(False)
         self.message_input.setEnabled(True)
-
         # Замена кнопки "Connect" на "Reconnect"
         self.connect_button.setText("Reconnect")
         self.connect_button.clicked.disconnect()
         self.connect_button.clicked.connect(self.reconnectChat)
         
     def reconnectChat(self):
-        client_socket.close()
-        print("Сокет закрыт")
-        # Код для переподключения к веб-чату
-        self.chat_window.append('Переподключение к чату')
-
         # Разблокируем ввод IP-адреса, порта и никнейма
         self.ip_input.setEnabled(True)
         self.port_input.setEnabled(True)
         self.nick_input.setEnabled(True)
         self.message_input.setEnabled(False)
-
         # Замена кнопки "Reconnect" на "Connect"
         self.connect_button.setText("Connect")
         self.connect_button.clicked.disconnect()
         self.connect_button.clicked.connect(self.connect_to_chat)
 
-        # Добавьте код для переподключения к веб-чату
-        # ...
+
+class WorkerSocket(QThread):
+    finished = pyqtSignal(bool)
+    userName = pyqtSignal(str)
+    message = pyqtSignal(str)
+    newMessage = pyqtSignal(str)
+
+    def __init__(self, host, port, username, chat_window):
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.username = username
+        self.client_socket = None
+        self.running = True
+        self.chat_window = chat_window  # Сохраняем ссылку на chat_window
+
+    def run(self):
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect((self.host, self.port))
+            self.client_socket.send(self.username.encode('utf-8'))
+            self.userName.emit(self.username)
+            self.finished.emit(True)
+            self.receive_messages()
+        except Exception as e:
+            self.finished.emit(False)
+            print(f"Ошибка: {e}")
+
+    def receive_messages(self):
+        while self.running:
+            try:
+                data = self.client_socket.recv(4096)
+                if data:
+                    message = data.decode('utf-8')
+                    self.chat_window.append(message)
+            except:
+                pass
+
+    def send_message(self, message):
+        if self.client_socket:
+            try:
+                self.client_socket.send(message.encode('utf-8'))
+                self.message.emit(message)
+            except Exception as e:
+                print(f"Ошибка при отправке сообщения: {e}")
+
+    def stop(self):
+        self.running = False
+        if self.client_socket:
+            self.client_socket.close()
+        self.quit()
+        self.wait()
+
+
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     chat_client = ChatClient()
     chat_client.show()
     sys.exit(app.exec_())
+    # Включаем веб-чат
+
+#Во первых, не видно текста, который отправляет другой клиент.
+#На сервере сообщение удваивается при 2 подключённых клиентов. Узнать, происходит это из-за того, что оба клиента на 1 аёпи или же это проблема сервера
